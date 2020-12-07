@@ -1,3 +1,39 @@
+2020-12-04
+    - 2.25.0
+    - [API, FEATURE] Add es_delay_onclose option to delay on_close until all
+      data is ACKed.  Use new function lsquic_stream_has_unacked_data() to
+      learn whether peer acknowledged all data written to stream.
+    - [API] Add optional on_reset() stream callback to get notifications
+      when RESET or STOP_SENDING frames are received.
+    - [BUGFIX] On STOP_SENDING, make conn tickable is _writeable_, not
+      readable.
+
+2020-11-24
+    - 2.24.5
+    - [FEATURE] Improve Delayed ACKs extension and turn it on by default.
+    - Limit receive history to a finite amount of memory.
+
+2020-11-18
+    - 2.24.4
+    - [BUGFIX] Check whether ECN counts are set in ACK struct before using
+      them.
+    - [BUGFIX] Calculate TLP timer correctly when only one packet is in
+      flight.
+    - [BUGFIX] Min RTO delay is 200 milliseconds, not 1 second.
+    - [BUGFIX] Memory leak in QPACK decoder handler: discard hset when
+      necessary.
+    - Allow retired and drained CIDs to be reused after a timeout.
+
+2020-11-11
+    - 2.24.3
+    - [BUGFIX] Get rough RTT estimate on receipt of Handshake packet.
+      This prevents BBR on the client from miscalculating pacing rate,
+      slowing down sending of ACK packets.
+    - [BUGFIX] Packets sent during handshake are app-limited.
+    - [BUGFIX] Bandwidth sampler starts in app-limited mode.
+    - [BUGFIX] Memory leak: free QPACK handler context in stream dtor.
+    - Logging improvements.
+
 2020-11-05
     - 2.24.2
     - [BUGFIX] Allow peer to migrate when its SCID is zero-length.

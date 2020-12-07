@@ -81,6 +81,9 @@ enum stream_if { STREAM_IF_STD, STREAM_IF_HSK, STREAM_IF_HDR, N_STREAM_IFS };
 #define MAX_RETR_PACKETS_SINCE_LAST_ACK 2
 #define ACK_TIMEOUT                     25000
 
+/* Maximum number of ACK ranges that can fit into gQUIC ACK frame */
+#define MAX_ACK_RANGES 256
+
 /* IMPORTANT: Keep values of FC_SERVER and FC_HTTP same as LSENG_SERVER
  * and LSENG_HTTP.
  */
@@ -619,6 +622,7 @@ new_conn_common (lsquic_cid_t cid, struct lsquic_engine_public *enpub,
     conn->fc_pub.packet_out_malo =
                         lsquic_malo_create(sizeof(struct lsquic_packet_out));
     conn->fc_pub.path = &conn->fc_path;
+    conn->fc_pub.max_peer_ack_usec = ACK_TIMEOUT;
     conn->fc_stream_ifs[STREAM_IF_STD].stream_if     = enpub->enp_stream_if;
     conn->fc_stream_ifs[STREAM_IF_STD].stream_if_ctx = enpub->enp_stream_if_ctx;
     conn->fc_settings = &enpub->enp_settings;
@@ -660,7 +664,7 @@ new_conn_common (lsquic_cid_t cid, struct lsquic_engine_public *enpub,
     conn->fc_pub.all_streams = lsquic_hash_create();
     if (!conn->fc_pub.all_streams)
         goto cleanup_on_error;
-    lsquic_rechist_init(&conn->fc_rechist, 0);
+    lsquic_rechist_init(&conn->fc_rechist, 0, MAX_ACK_RANGES);
     if (conn->fc_flags & FC_HTTP)
     {
         conn->fc_pub.u.gquic.hs = lsquic_headers_stream_new(
@@ -1326,6 +1330,8 @@ new_stream (struct full_conn *conn, lsquic_stream_id_t stream_id,
         flags |= SCF_HTTP;
     if (conn->fc_enpub->enp_settings.es_rw_once)
         flags |= SCF_DISP_RW_ONCE;
+    if (conn->fc_enpub->enp_settings.es_delay_onclose)
+        flags |= SCF_DELAY_ONCLOSE;
 
     return new_stream_ext(conn, stream_id, STREAM_IF_STD, flags);
 }
@@ -3545,6 +3551,7 @@ full_conn_ci_tick (lsquic_conn_t *lconn, lsquic_time_t now)
     if (!handshake_done_or_doing_sess_resume(conn))
     {
         process_hsk_stream_write_events(conn);
+        lsquic_send_ctl_maybe_app_limited(&conn->fc_send_ctl, &conn->fc_path);
         goto end_write;
     }
 
@@ -4020,6 +4027,7 @@ headers_stream_on_push_promise (void *ctx, struct uncompressed_headers *uh)
     }
 
     stream = new_stream_ext(conn, uh->uh_oth_stream_id, STREAM_IF_STD,
+                (conn->fc_enpub->enp_settings.es_delay_onclose?SCF_DELAY_ONCLOSE:0)|
                 SCF_DI_AUTOSWITCH|(conn->fc_enpub->enp_settings.es_rw_once ?
                                                         SCF_DISP_RW_ONCE : 0));
     if (!stream)
@@ -4390,7 +4398,7 @@ lsquic_gquic_full_conn_srej (struct lsquic_conn *lconn)
     if (cce->cce_hash_el.qhe_flags & QHE_HASHED)
     {
         lsquic_engine_retire_cid(conn->fc_enpub, lconn, cce_idx,
-                                        0 /* OK to omit the `now' value */);
+                                        0 /* OK to omit the `now' value */, 0);
         lconn->cn_cces_mask |= 1 << cce_idx;
         lsquic_generate_cid_gquic(&cce->cce_cid);
         if (0 != lsquic_engine_add_cid(conn->fc_enpub, lconn, cce_idx))
@@ -4409,7 +4417,7 @@ lsquic_gquic_full_conn_srej (struct lsquic_conn *lconn)
 
     /* Reset receive history */
     lsquic_rechist_cleanup(&conn->fc_rechist);
-    lsquic_rechist_init(&conn->fc_rechist, 0);
+    lsquic_rechist_init(&conn->fc_rechist, 0, MAX_ACK_RANGES);
 
     /* Reset send controller state */
     lsquic_send_ctl_cleanup(&conn->fc_send_ctl);
