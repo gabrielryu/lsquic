@@ -10,8 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/queue.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <openssl/md5.h>
 
@@ -41,11 +43,18 @@ struct lsquic_conn_ctx;
 
 struct server_ctx {
     TAILQ_HEAD(, lsquic_conn_ctx)   conn_ctxs;
+    LIST_HEAD(, file) files;
     unsigned max_reqs;
     int n_conn;
     time_t expiry;
     struct sport_head sports;
     struct prog *prog;
+};
+
+struct file {
+    LIST_ENTRY(file)        next_file;
+    const char             *filename;
+    int                     fd;
 };
 
 struct lsquic_conn_ctx {
@@ -54,7 +63,6 @@ struct lsquic_conn_ctx {
     unsigned             n_reqs, n_closed;
     struct server_ctx   *server_ctx;
 };
-
 
 static lsquic_conn_ctx_t *
 server_on_new_conn (void *stream_if_ctx, lsquic_conn_t *conn)
@@ -102,9 +110,11 @@ server_on_conn_closed (lsquic_conn_t *conn)
 struct lsquic_stream_ctx {
     lsquic_stream_t     *stream;
     struct server_ctx   *server_ctx;
+    struct file         *file;
     MD5_CTX              md5ctx;
     unsigned char        md5sum[MD5_DIGEST_LENGTH];
     char                 md5str[MD5_DIGEST_LENGTH * 2 + 1];
+    const char           *filename;
 };
 
 
@@ -121,12 +131,31 @@ find_conn_h (const struct server_ctx *server_ctx, lsquic_stream_t *stream)
     return NULL;
 }
 
+static int
+set_nonblocking (int fd)
+{
+    int flags;
+
+    flags = fcntl(fd, F_GETFL);
+    if (-1 == flags)
+        return -1;
+    flags |= O_NONBLOCK;
+    if (0 != fcntl(fd, F_SETFL, flags))
+        return -1;
+
+    return 0;
+}
+
 
 static lsquic_stream_ctx_t *
 server_md5_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
 {
     struct lsquic_conn_ctx *conn_h;
     lsquic_stream_ctx_t *st_h = malloc(sizeof(*st_h));
+    
+    mode_t mode;
+    mode = S_IRWXO | S_IRWXU | S_IRWXG;
+
     st_h->stream = stream;
     st_h->server_ctx = stream_if_ctx;
     lsquic_stream_wantread(stream, 1);
@@ -136,6 +165,32 @@ server_md5_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
     assert(conn_h);
     conn_h->n_reqs++;
     LSQ_NOTICE("request #%u", conn_h->n_reqs);
+
+    st_h->file = LIST_FIRST(&st_h->server_ctx->files);
+    printf("Check open file : %s\n", st_h->file->filename);
+   
+    //Check File open == Gabriel
+    st_h->file = LIST_FIRST(&st_h->server_ctx->files);
+    printf("Check open file : %s\n", st_h->file->filename);
+   
+    st_h->file->fd = open(st_h->file->filename, O_CREAT | O_WRONLY | O_TRUNC, mode );
+    
+    if(0!=set_nonblocking(st_h->file->fd))
+    {
+        perror("fcntl");
+        exit(EXIT_FAILURE);   
+    }
+    
+    if (st_h->file->fd < 0)
+    {
+        LSQ_ERROR("could not open %s for writing: %s",
+                  st_h->file->filename, strerror(errno));
+        exit(1);
+    }
+    
+    LIST_REMOVE(st_h->file, next_file);
+    //
+
     if (st_h->server_ctx->max_reqs &&
         conn_h->n_reqs >= st_h->server_ctx->max_reqs)
     {
@@ -151,13 +206,12 @@ server_md5_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
     return st_h;
 }
 
-
 static void
 server_md5_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
 {
-    char buf[0x1000];
+    //char buf[0x1000];
+    char buf[15000];
     ssize_t nr;
-
     nr = lsquic_stream_read(stream, buf, sizeof(buf));
     if (-1 == nr)
     {
@@ -185,9 +239,22 @@ server_md5_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
     {
         if (g_really_calculate_md5)
             MD5_Update(&st_h->md5ctx, buf, nr);
+        printf("=======================\nNR : %ld\n=======================\n",nr);
+        
+        ssize_t nw = write(st_h->file->fd, buf, nr);
+        printf("=======================\nNW : %ld\n=======================\n",nw);
+        if (nw == 0)
+        {
+            close(st_h->file->fd);
+            printf("Close FD\n");
+        }
+        else if(nw == -1)
+            perror("Write");
+        
     }
     else
     {
+        //printf("fclose\n");
         lsquic_stream_wantread(stream, 0);
         if (g_really_calculate_md5)
         {
@@ -234,6 +301,9 @@ server_md5_on_write (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
         perror("lsquic_stream_write");
         return;
     }
+    printf("==========md5 check==========\n");
+            printf("%.*s  \n", (int) sizeof(st_h->md5str), st_h->md5str);
+            printf("==============================\n");
     lsquic_stream_wantwrite(stream, 0);
     lsquic_stream_shutdown(stream, 1);
 }
@@ -262,6 +332,7 @@ const struct lsquic_stream_if server_md5_stream_if = {
     .on_new_conn            = server_on_new_conn,
     .on_conn_closed         = server_on_conn_closed,
     .on_new_stream          = server_md5_on_new_stream,
+    //.on_read                = server_on_read_md5,
     .on_read                = server_md5_on_read,
     .on_write               = server_md5_on_write,
     .on_close               = server_on_close,
@@ -290,6 +361,7 @@ main (int argc, char **argv)
     int opt, s;
     struct prog prog;
     struct server_ctx server_ctx;
+    struct file *file;
 
     memset(&server_ctx, 0, sizeof(server_ctx));
     TAILQ_INIT(&server_ctx.conn_ctxs);
@@ -298,7 +370,7 @@ main (int argc, char **argv)
     prog_init(&prog, LSENG_SERVER, &server_ctx.sports,
                                     &server_md5_stream_if, &server_ctx);
 
-    while (-1 != (opt = getopt(argc, argv, PROG_OPTS "hr:Fn:e:p:")))
+    while (-1 != (opt = getopt(argc, argv, PROG_OPTS "hr:Fn:e:p:f:")))
     {
         switch (opt) {
         case 'F':
@@ -314,6 +386,13 @@ main (int argc, char **argv)
         case 'e':
             server_ctx.expiry = time(NULL) + atoi(optarg);
             break;
+        case 'f':
+            file = calloc(1, sizeof(*file));
+            LIST_INSERT_HEAD(&server_ctx.files, file, next_file);
+            //++client_ctx.n_files;
+            file->filename = optarg;
+            
+            break;
         case 'n':
             server_ctx.n_conn = atoi(optarg);
             break;
@@ -327,6 +406,11 @@ main (int argc, char **argv)
         }
     }
 
+    if (LIST_EMPTY(&server_ctx.files))
+    {
+        fprintf(stderr, "please specify one of more files using -f\n");
+        exit(1);
+    }
     add_alpn("md5");
     if (0 != prog_prep(&prog))
     {

@@ -130,7 +130,7 @@ echo_client_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
 {
     char c;
     size_t nr;
-
+    printf("Check echo_client_on_read\n");
     nr = lsquic_stream_read(stream, &c, 1);
     if (0 == nr)
     {
@@ -217,6 +217,8 @@ main (int argc, char **argv)
 
     while (-1 != (opt = getopt(argc, argv, PROG_OPTS "h")))
     {
+        printf("optr : %c \n",(char)opt);
+        printf("optrag : %s \n",optarg);
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -255,8 +257,9 @@ main (int argc, char **argv)
     }
 
     LSQ_DEBUG("entering event loop");
-
+    printf("Check the run proc #1\n");
     s = prog_run(&prog);
+    printf("Check the run proc #2\n");
     prog_cleanup(&prog);
 
     exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);

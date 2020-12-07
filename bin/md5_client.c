@@ -37,6 +37,19 @@
 #include "../src/liblsquic/lsquic_hash.h"
 #include "../src/liblsquic/lsquic_stream.h"
 
+static int g_really_calculate_md5 = 1;
+static int md5_check = 0;   //m5 check
+static int md5_check_buf = 0;
+
+/* Turn on to test whether stream reset is being sent when stream is closed
+ * prematurely.
+ */
+static struct {
+    unsigned        stream_id;
+    unsigned long   limit;
+    unsigned long   n_read;
+} g_premature_close;
+
 /* Set to non-zero value to test out what happens when reset is sent */
 #define RESET_AFTER_N_WRITES 0
 
@@ -59,6 +72,7 @@ struct file {
         FILE_RESET  = (1 << 0),
     }                       file_flags;
     size_t                  md5_off;
+    MD5_CTX              md5ctx;
     char                    md5str[MD5_DIGEST_LENGTH * 2];
 };
 
@@ -72,6 +86,7 @@ struct client_ctx {
     lsquic_engine_t             *engine;
     struct service_port         *sport;
     struct prog                 *prog;
+    
 };
 
 struct lsquic_conn_ctx {
@@ -100,6 +115,7 @@ client_on_new_conn (void *stream_if_ctx, lsquic_conn_t *conn)
 static void
 client_on_goaway_received (lsquic_conn_t *conn)
 {
+    printf("Check GOAWAY received\n");
     LSQ_NOTICE("GOAWAY received");
 }
 
@@ -108,6 +124,7 @@ static void
 client_on_conn_closed (lsquic_conn_t *conn)
 {
     lsquic_conn_ctx_t *conn_h = lsquic_conn_get_ctx(conn);
+    
     LSQ_NOTICE("Connection closed");
     prog_stop(conn_h->client_ctx->prog);
     free(conn_h);
@@ -116,9 +133,14 @@ client_on_conn_closed (lsquic_conn_t *conn)
 
 struct lsquic_stream_ctx {
     lsquic_stream_t     *stream;
+    //lsquic_stream_t     *r_stream;
     struct client_ctx   *client_ctx;
     struct file         *file;
     struct event        *read_stdin_ev;
+    MD5_CTX              md5ctx;
+    unsigned char        md5sum[MD5_DIGEST_LENGTH];
+    char                 md5str[MD5_DIGEST_LENGTH * 2 + 1];
+    int                  s_filename;  //filename sent flag
     struct {
         int         initialized;
         size_t      size,
@@ -163,6 +185,7 @@ client_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
         if (g_write_file)
         {
             st_h->file->fd = -1;
+            
             st_h->file->reader.lsqr_read = test_reader_read;
             st_h->file->reader.lsqr_size = test_reader_size;
             st_h->file->reader.lsqr_ctx = create_lsquic_reader_ctx(st_h->file->filename);
@@ -171,6 +194,8 @@ client_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
         }
         else
         {
+
+            printf("Check open file : %s\n",st_h->file->filename);
             st_h->file->fd = open(st_h->file->filename, O_RDONLY);
             if (st_h->file->fd < 0)
             {
@@ -236,6 +261,7 @@ buf_reader_size (void *reader_ctx)
 static size_t
 buf_reader_read (void *reader_ctx, void *buf, size_t count)
 {
+    printf("Check buf_reader_read!!!\n");
     lsquic_stream_ctx_t *const st_h = reader_ctx;
     ssize_t nr;
     unsigned char local_buf[LOCAL_BUF_SIZE];
@@ -263,6 +289,7 @@ buf_reader_read (void *reader_ctx, void *buf, size_t count)
 static void
 client_file_on_write_buf (lsquic_stream_ctx_t *st_h)
 {
+    printf("client_file_on_write_buf\n");
     ssize_t nw;
     struct lsquic_reader reader = {
         .lsqr_read = buf_reader_read,
@@ -308,14 +335,141 @@ client_file_on_write_buf (lsquic_stream_ctx_t *st_h)
     }
 }
 
+static void
+client_md5_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+    char buf[0x1000];
+    memset(buf,0,sizeof(buf));
+    ssize_t nr;
+    //lsquic_stream_ctx_t *const md5_stream
+    //st_h->md5ctx
+    MD5_Init(&st_h->md5ctx);
+    char * data;
+    int fd;
+    fd= open(st_h->file->filename, O_RDONLY);
+    struct stat st;
+    printf("Check FD : %d\n",st_h->file->fd);
+    if (0 != fstat(fd, &st))
+    {
+        printf("cannot fstat(%s) failed: %s\n", st_h->file->filename, strerror(errno));
+        (void) close(fd);
+        return;
+    }
+    data = (char *)malloc(st.st_size);
+    nr = read(fd, data, st.st_size);
+    //nr = lsquic_stream_read(stream, buf, sizeof(buf));
+    printf("Check md5 nr : %ld\n",nr);
+    if (-1 == nr)
+    {
+        /* This should never return an error if we only call read() once
+         * per callback.
+         */
+        perror("lsquic_stream_read");
+        //lsquic_stream_shutdown(stream, 0);
+        return;
+    }
+
+    if (g_premature_close.limit )
+    {
+        g_premature_close.n_read += nr;
+        if (g_premature_close.n_read > g_premature_close.limit)
+        {
+            LSQ_WARN("Done after reading %lu bytes", g_premature_close.n_read);
+            //lsquic_stream_shutdown(stream, 0);
+            return;
+        }
+    }
+
+    if (nr!=0)
+    {
+        
+        //lsquic_stream_wantread(stream, 0);
+        printf("Check NR!!\n");
+        if (g_really_calculate_md5)
+        {
+            //MD5_Update(&st_h->md5ctx, buf, nr);
+            MD5_Update(&st_h->md5ctx, data, nr);
+            MD5_Final(st_h->md5sum, &st_h->md5ctx);
+            snprintf(st_h->md5str, sizeof(st_h->md5str),
+                "%02x%02x%02x%02x%02x%02x%02x%02x"
+                "%02x%02x%02x%02x%02x%02x%02x%02x"
+                , st_h->md5sum[0]
+                , st_h->md5sum[1]
+                , st_h->md5sum[2]
+                , st_h->md5sum[3]
+                , st_h->md5sum[4]
+                , st_h->md5sum[5]
+                , st_h->md5sum[6]
+                , st_h->md5sum[7]
+                , st_h->md5sum[8]
+                , st_h->md5sum[9]
+                , st_h->md5sum[10]
+                , st_h->md5sum[11]
+                , st_h->md5sum[12]
+                , st_h->md5sum[13]
+                , st_h->md5sum[14]
+                , st_h->md5sum[15]
+            );
+            /*
+            printf("==========Check File md5 check==========\n");
+            printf("%.*s  %s\n", (int) sizeof(st_h->md5str),
+                                                    st_h->md5str,
+                                                    st_h->file->filename);
+            printf("==============================\n");
+            */
+        }
+        else
+        {
+            printf("Check g_really_calculate_md5!!\n");
+            st_h->md5str[sizeof(st_h->md5str) - 1] = '\0';
+        }
+        memset(st_h->md5sum, '0', sizeof(st_h->md5sum)-1);
+        md5_check_buf = 1;
+        close(fd);
+        free(data);
+        //lsquic_stream_wantwrite(stream, 1);
+        //lsquic_stream_shutdown(stream, 0);
+    }
+}
+
+
 
 static void
 client_file_on_write_efficient (lsquic_stream_t *stream,
                                                 lsquic_stream_ctx_t *st_h)
 {
+    //printf("client_file_on_write_client_file_on_write_efficient\n");
     ssize_t nw;
-
+    if(md5_check_buf == 0)
+        client_md5_on_read(stream, st_h);
+    if(st_h->s_filename==1)
+    {
+        char buf[20];
+        strcpy(buf, st_h->file->filename);
+        printf("%s\n",buf);
+        ssize_t c =lsquic_stream_write(stream, &buf, sizeof(buf));
+        printf("Check send filename : %ld\n",c);
+        st_h->s_filename = 1;
+        lsquic_stream_wantwrite(stream, 1);
+        client_file_on_write_efficient(stream, st_h);   
+        /* 
+        if (0==lsquic_stream_write(stream, st_h->file->filename, sizeof(st_h->file->filename)))
+        {
+            printf("Check send filename\n");
+            st_h->s_filename = 1;
+            //lsquic_stream_shutdown(st_h->stream, 1);
+            client_file_on_write_efficient(stream, st_h);
+        }
+        
+        else
+        {
+            LSQ_ERROR("read error: %s", strerror(errno));
+            exit(1);
+        }
+        */
+    }
     nw = lsquic_stream_writef(stream, &st_h->file->reader);
+    
     if (nw < 0)
     {
         LSQ_ERROR("write error: %s", strerror(errno));
@@ -356,6 +510,7 @@ client_file_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
     size_t ntoread = sizeof(st_h->file->md5str) - st_h->file->md5_off;
     if (0 == ntoread)
     {
+        printf("Check ntoread ==0 %ld\n",ntoread);
         lsquic_stream_wantread(stream, 0);
         /* XXX What about an error (due to RST_STREAM) here: how are we to
          *     handle it?
@@ -366,15 +521,28 @@ client_file_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
             LSQ_NOTICE("%.*s  %s", (int) sizeof(st_h->file->md5str),
                                                     st_h->file->md5str,
                                                     st_h->file->filename);
+            /*                                        
+            printf("==========md5 check==========\n");
+            printf("%.*s  %s\n", (int) sizeof(st_h->file->md5str),
+                                                    st_h->file->md5str,
+                                                    st_h->file->filename);
+            printf("Size of Buf : %ld\n",sizeof(buf));
+            printf("==============================\n");
+            */
             fflush(stdout);
             LSQ_DEBUG("# of files: %d", st_h->client_ctx->n_files);
+            if(strcmp(st_h->md5str,st_h->file->md5str)==0)
+                md5_check = 1;
+            
             lsquic_stream_shutdown(stream, 0);
+            
         }
         else
             LSQ_ERROR("expected FIN from stream!");
     }
     else
     {
+        //printf("Check %ld\n",ntoread);
         ssize_t nr = lsquic_stream_read(stream,
             st_h->file->md5str + st_h->file->md5_off, ntoread);
         if (-1 == nr)
@@ -394,7 +562,16 @@ client_file_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
 static void
 client_file_on_close (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
 {
+    printf("==========md5 check==========\n");
+    printf("Client : %.*s  \n", (int)sizeof(st_h->md5str),
+           st_h->md5str);
+    printf("Server : %.*s  %s\n", (int)sizeof(st_h->file->md5str),
+           st_h->file->md5str,
+           st_h->file->filename);
+    printf("==============================\n");
     --st_h->client_ctx->n_files;
+    printf("%s called for stream %"PRIu64", # files: %u\n", __func__,
+                        lsquic_stream_id(stream), st_h->client_ctx->n_files);
     LSQ_NOTICE("%s called for stream %"PRIu64", # files: %u", __func__,
                         lsquic_stream_id(stream), st_h->client_ctx->n_files);
     if (0 == st_h->client_ctx->n_files)
@@ -444,9 +621,7 @@ usage (const char *prog)
             , prog);
 }
 
-
-int
-main (int argc, char **argv)
+int callfunc(int argc, char **argv )
 {
     int opt, s;
     struct sport_head sports;
@@ -456,15 +631,18 @@ main (int argc, char **argv)
 
     file = NULL;
     memset(&client_ctx, 0, sizeof(client_ctx));
+    //memset(&sports, 0, sizeof(sports));
+    //memset(&prog, 0, sizeof(prog));
     client_ctx.prog = &prog;
 
     TAILQ_INIT(&sports);
     prog_init(&prog, 0, &sports, &client_file_stream_if, &client_ctx);
     prog.prog_api.ea_alpn = "md5";
-
+    
     while (-1 != (opt = getopt(argc, argv, PROG_OPTS "bhr:f:p:")))
     {
-        switch (opt) {
+        switch (opt)
+        {
         case 'p':
             if (file)
                 file->priority = atoi(optarg);
@@ -482,6 +660,124 @@ main (int argc, char **argv)
             LIST_INSERT_HEAD(&client_ctx.files, file, next_file);
             ++client_ctx.n_files;
             file->filename = optarg;
+            break;
+        case 'r':
+            g_reset_stream.stream_id = atoi(optarg);
+            g_reset_stream.offset = atoi(strchr(optarg, ':') + 1);
+            break;
+        case 'h':
+            usage(argv[0]);
+            prog_print_common_options(&prog, stdout);
+            exit(0);
+        default:
+            if (0 != prog_set_opt(&prog, opt, optarg))
+                exit(1);
+        }
+    }
+
+    if (LIST_EMPTY(&client_ctx.files))
+    {
+        //printf("%d=======%d ======%s\n",opt,argc, argv[1]);
+        fprintf(stderr, "please specify one of more files using -f\n");
+        exit(1);
+    }
+
+    if (0 != prog_prep(&prog))
+    {
+        LSQ_ERROR("could not prep");
+        exit(EXIT_FAILURE);
+    }
+    client_ctx.sport = TAILQ_FIRST(&sports);
+
+    if (0 != prog_connect(&prog, NULL, 0))
+    {
+        LSQ_ERROR("could not connect");
+        exit(EXIT_FAILURE);
+    }
+
+    LSQ_DEBUG("entering event loop");
+    s = prog_run(&prog);
+    prog_cleanup(&prog);
+    char c;
+    if(md5_check == 1)
+        printf("MD5 Checked :: Data Transport Succed!!\n");
+    else
+    {
+        printf("MD5 Checked :: Data Transport Error!!\n");
+        printf("Do you want to resend it? (y/n): ");
+        scanf(" %c", &c);
+        if (c == 'y')
+            return 0;
+        else
+        {
+            exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
+            return 1;
+        }
+    }
+    printf("Do you want to retry? (y/n): ");
+    scanf(" %c", &c);
+    if(c == 'y')
+        return 0;
+    else
+    {
+        exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
+        return 1;
+    }
+}
+
+int
+main (int argc, char **argv)
+{
+    int s =0;
+    while (s == 0)
+    {
+        s = callfunc(argc, argv);    
+        optind=1;
+        md5_check = 0;
+        
+    }
+    /*
+    int opt, s;
+    struct sport_head sports;
+    struct prog prog;
+    struct client_ctx client_ctx;
+    struct file *file;
+
+    file = NULL;
+    memset(&client_ctx, 0, sizeof(client_ctx));
+    memset(&sports, 0, sizeof(sports));
+    memset(&prog, 0, sizeof(prog));
+    client_ctx.prog = &prog;
+
+    TAILQ_INIT(&sports);
+    prog_init(&prog, 0, &sports, &client_file_stream_if, &client_ctx);
+    prog.prog_api.ea_alpn = "md5";
+    printf("=======%d ======%s\n", opt, optarg);
+
+    while (-1 != (opt = getopt(argc, argv, PROG_OPTS "bhr:f:p:")))
+    {
+        printf("=======%d ======%s\n", opt, optarg);
+        switch (opt)
+        {
+        case 'p':
+            if (file)
+                file->priority = atoi(optarg);
+            else
+            {
+                fprintf(stderr, "No file to apply priority to\n");
+                exit(1);
+            }
+            break;
+        case 'b':
+            g_write_file = 0;
+            break;
+        case 'f':
+            file = calloc(1, sizeof(*file));
+            LIST_INSERT_HEAD(&client_ctx.files, file, next_file);
+            ++client_ctx.n_files;
+            file->filename = optarg;
+            printf("file : %s   %d \n", file->filename, client_ctx.n_files);
+            printf("check opt\n");
             break;
         case 'r':
             g_reset_stream.stream_id = atoi(optarg);
@@ -519,7 +815,23 @@ main (int argc, char **argv)
     LSQ_DEBUG("entering event loop");
 
     s = prog_run(&prog);
-    prog_cleanup(&prog);
 
-    exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
+    //prog_cleanup(&prog);
+    
+    //prog_prep(&prog);
+    //client_ctx.sport = TAILQ_FIRST(&sports);
+    //prog_connect(&prog, NULL, 0);
+    //s = prog_run(&prog);
+    
+    prog_cleanup(&prog);
+    printf("%d   %s\n", argc, argv[1]);
+    printf("%d       %s\n", opt, optarg);
+    printf("Do you want to retry? (y/n): ");
+    */
+    //scanf("%s", sel);
+
+    //prog_cleanup(&prog);
+    //printf("file : %s   %d \n", file->filename, client_ctx.n_files);
+    //printf("%s\n", argv[2]);
+    //exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
 }

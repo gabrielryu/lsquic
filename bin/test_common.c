@@ -2201,6 +2201,7 @@ create_lsquic_reader_ctx (const char *filename)
 {
     int fd;
     struct stat st;
+    printf("Check open file in test_common : %s\n",filename);
 
 #ifndef WIN32
     fd = open(filename, O_RDONLY);

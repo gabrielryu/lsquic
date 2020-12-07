@@ -1,0 +1,22 @@
+{
+    "files.associations": {
+        "*.inc": "c",
+        "*.tcc": "c",
+        "cctype": "c",
+        "climits": "c",
+        "cmath": "c",
+        "compare": "c",
+        "concepts": "c",
+        "cstdarg": "c",
+        "cstdio": "c",
+        "cstdlib": "c",
+        "exception": "c",
+        "type_traits": "c",
+        "limits": "c",
+        "new": "c",
+        "cinttypes": "c",
+        "cstdbool": "c",
+        "cstdint": "c",
+        "typeinfo": "c"
+    }
+}

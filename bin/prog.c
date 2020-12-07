@@ -95,7 +95,7 @@ prog_init (struct prog *prog, unsigned flags,
     return 0;
 }
 
-
+// 이거 체크!!
 static int
 prog_add_sport (struct prog *prog, const char *arg)
 {
@@ -226,6 +226,7 @@ prog_print_common_options (const struct prog *prog, FILE *out)
 int
 prog_set_opt (struct prog *prog, int opt, const char *arg)
 {
+    
 #ifndef WIN32
     struct stat st;
     int s;
@@ -290,6 +291,7 @@ prog_set_opt (struct prog *prog, int opt, const char *arg)
         prog->prog_settings.es_clock_granularity = atoi(arg);
         return 0;
     case 's':
+        printf("case s\n");
         if (0 == (prog->prog_engine_flags & LSENG_SERVER) &&
                                             !TAILQ_EMPTY(prog->prog_sports))
             return -1;
@@ -369,7 +371,7 @@ prog_set_opt (struct prog *prog, int opt, const char *arg)
         return -1;
 #endif
     default:
-        return 1;
+            return 1;
     }
 }
 
@@ -377,6 +379,7 @@ prog_set_opt (struct prog *prog, int opt, const char *arg)
 struct event_base *
 prog_eb (struct prog *prog)
 {
+    printf("prog_eb call\n");
     return prog->prog_eb;
 }
 
@@ -397,7 +400,7 @@ prog_connect (struct prog *prog, unsigned char *sess_resume, size_t sess_resume_
                     prog->prog_max_packet_size, sess_resume, sess_resume_len,
                     sport->sp_token_buf, sport->sp_token_sz))
         return -1;
-
+    printf("prog_max_packet_size : %d\n",prog->prog_max_packet_size);
     prog_process_conns(prog);
     return 0;
 }
@@ -462,9 +465,9 @@ prog_process_conns (struct prog *prog)
 {
     int diff;
     struct timeval timeout;
-
+    //printf("check prog_process_conns\n");
     lsquic_engine_process_conns(prog->prog_engine);
-
+    //printf("check lsquic_engine_process_conns\n");
     if (lsquic_engine_earliest_adv_tick(prog->prog_engine, &diff))
     {
         if (diff < 0
@@ -472,15 +475,18 @@ prog_process_conns (struct prog *prog)
         {
             timeout.tv_sec  = 0;
             timeout.tv_usec = prog->prog_settings.es_clock_granularity;
+            //printf("check diff %d < 0\n",diff);
         }
         else
         {
             timeout.tv_sec = (unsigned) diff / 1000000;
             timeout.tv_usec = (unsigned) diff % 1000000;
+            //printf("check diff %d > 0\n",diff);
         }
 
         if (!prog_is_stopped())
-            event_add(prog->prog_timer, &timeout);
+            {//rintf("prog_is_stopped\n");
+                event_add(prog->prog_timer, &timeout);}
     }
 }
 
@@ -525,9 +531,8 @@ prog_run (struct prog *prog)
                                                     prog_usr2_handler, prog);
     evsignal_add(prog->prog_usr2, NULL);
 #endif
-
+    printf("Check the prog_run\n");
     event_base_loop(prog->prog_eb, 0);
-
     return 0;
 }
 

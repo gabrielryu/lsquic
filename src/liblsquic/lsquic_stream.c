@@ -1663,6 +1663,7 @@ readv_f (void *ctx_p, const unsigned char *buf, size_t len, int fin)
         memcpy(ctx->p, buf, ntocopy);
         ctx->p += ntocopy;
         buf += ntocopy;
+        
         if (ctx->p == (unsigned char *) ctx->iov->iov_base + ctx->iov->iov_len)
         {
             do
