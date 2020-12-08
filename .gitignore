@@ -1,0 +1,19 @@
+# Directories #
+CMakeFiles/
+Testing/
+.vscode/
+# ignore all files in the build/ directory
+build/
+
+# Files #
+*.cmake
+CMakeCache.txt
+Makefile
+http_client
+md5_client
+duck_client
+echo_client
+md5_server
+echo_server
+duck_server
+http_server
