@@ -876,7 +876,7 @@ sport_init_server (struct service_port *sport, struct lsquic_engine *engine,
         s = setsockopt(sockfd, IPPROTO_IPV6, IPV6_PKTINFO, CHAR_CAST &on, sizeof(on));
 #endif
     }
-
+        
     if (0 != s)
     {
         saved_errno = errno;
@@ -950,9 +950,14 @@ sport_init_server (struct service_port *sport, struct lsquic_engine *engine,
             on = IP_PMTUDISC_DO;
             s = setsockopt(sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &on,
                                                                 sizeof(on));
+#elif __APPLE__ //Apple doesn't support PMTUDISC and IP_DONTFRAG, so I just put the normal thing :: Gabriel
+            on = 1;
+            s = setsockopt(sockfd, IPPROTO_IP, IP_PKTINFO, CHAR_CAST &on, sizeof(on));
+            //s = setsockopt(sockfd, IPPROTO_IP, IP_DF, CHAR_CAST &on, sizeof(on));
 #else
             on = 1;
             s = setsockopt(sockfd, IPPROTO_IP, IP_DONTFRAG, CHAR_CAST &on, sizeof(on));
+        
 #endif
             if (0 != s)
             {
@@ -1139,6 +1144,10 @@ sport_init_client (struct service_port *sport, struct lsquic_engine *engine,
             on = IP_PMTUDISC_DO;
             s = setsockopt(sockfd, IPPROTO_IP, IP_MTU_DISCOVER, &on,
                                                                 sizeof(on));
+#elif __APPLE__ //Apple doesn't support PMTUDISC and IP_DONTFRAG, so I just put the normal thing :: Gabriel
+            on = 1;
+            s = setsockopt(sockfd, IPPROTO_IP, IP_PKTINFO, CHAR_CAST &on, sizeof(on));
+
 #elif WIN32
             on = 1;
             s = setsockopt(sockfd, IPPROTO_IP, IP_DONTFRAGMENT, CHAR_CAST &on, sizeof(on));

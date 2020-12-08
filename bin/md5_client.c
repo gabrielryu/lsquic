@@ -688,7 +688,7 @@ int callfunc(int argc, char **argv )
         exit(EXIT_FAILURE);
     }
     client_ctx.sport = TAILQ_FIRST(&sports);
-
+    
     if (0 != prog_connect(&prog, NULL, 0))
     {
         LSQ_ERROR("could not connect");
@@ -700,10 +700,10 @@ int callfunc(int argc, char **argv )
     prog_cleanup(&prog);
     char c;
     if(md5_check == 1)
-        printf("MD5 Checked :: Data Transport Succed!!\n");
+        printf("MD5 Checked :: Data Transfer Complete!!\n");
     else
     {
-        printf("MD5 Checked :: Data Transport Error!!\n");
+        printf("MD5 Checked :: Data Transfer Error!!\n");
         printf("Do you want to resend it? (y/n): ");
         scanf(" %c", &c);
         if (c == 'y')
@@ -736,102 +736,4 @@ main (int argc, char **argv)
         md5_check = 0;
         
     }
-    /*
-    int opt, s;
-    struct sport_head sports;
-    struct prog prog;
-    struct client_ctx client_ctx;
-    struct file *file;
-
-    file = NULL;
-    memset(&client_ctx, 0, sizeof(client_ctx));
-    memset(&sports, 0, sizeof(sports));
-    memset(&prog, 0, sizeof(prog));
-    client_ctx.prog = &prog;
-
-    TAILQ_INIT(&sports);
-    prog_init(&prog, 0, &sports, &client_file_stream_if, &client_ctx);
-    prog.prog_api.ea_alpn = "md5";
-    printf("=======%d ======%s\n", opt, optarg);
-
-    while (-1 != (opt = getopt(argc, argv, PROG_OPTS "bhr:f:p:")))
-    {
-        printf("=======%d ======%s\n", opt, optarg);
-        switch (opt)
-        {
-        case 'p':
-            if (file)
-                file->priority = atoi(optarg);
-            else
-            {
-                fprintf(stderr, "No file to apply priority to\n");
-                exit(1);
-            }
-            break;
-        case 'b':
-            g_write_file = 0;
-            break;
-        case 'f':
-            file = calloc(1, sizeof(*file));
-            LIST_INSERT_HEAD(&client_ctx.files, file, next_file);
-            ++client_ctx.n_files;
-            file->filename = optarg;
-            printf("file : %s   %d \n", file->filename, client_ctx.n_files);
-            printf("check opt\n");
-            break;
-        case 'r':
-            g_reset_stream.stream_id = atoi(optarg);
-            g_reset_stream.offset = atoi(strchr(optarg, ':') + 1);
-            break;
-        case 'h':
-            usage(argv[0]);
-            prog_print_common_options(&prog, stdout);
-            exit(0);
-        default:
-            if (0 != prog_set_opt(&prog, opt, optarg))
-                exit(1);
-        }
-    }
-
-    if (LIST_EMPTY(&client_ctx.files))
-    {
-        fprintf(stderr, "please specify one of more files using -f\n");
-        exit(1);
-    }
-
-    if (0 != prog_prep(&prog))
-    {
-        LSQ_ERROR("could not prep");
-        exit(EXIT_FAILURE);
-    }
-    client_ctx.sport = TAILQ_FIRST(&sports);
-
-    if (0 != prog_connect(&prog, NULL, 0))
-    {
-        LSQ_ERROR("could not connect");
-        exit(EXIT_FAILURE);
-    }
-
-    LSQ_DEBUG("entering event loop");
-
-    s = prog_run(&prog);
-
-    //prog_cleanup(&prog);
-    
-    //prog_prep(&prog);
-    //client_ctx.sport = TAILQ_FIRST(&sports);
-    //prog_connect(&prog, NULL, 0);
-    //s = prog_run(&prog);
-    
-    prog_cleanup(&prog);
-    printf("%d   %s\n", argc, argv[1]);
-    printf("%d       %s\n", opt, optarg);
-    printf("Do you want to retry? (y/n): ");
-    */
-    //scanf("%s", sel);
-
-    //prog_cleanup(&prog);
-    //printf("file : %s   %d \n", file->filename, client_ctx.n_files);
-    //printf("%s\n", argv[2]);
-    //exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
 }

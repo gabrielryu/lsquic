@@ -446,16 +446,19 @@ prog_init_server (struct prog *prog)
                                             ticket_keys, sizeof(ticket_keys)))
         {
             LSQ_ERROR("SSL_CTX_set_tlsext_ticket_keys failed");
+            printf("SSL_CTX_set_tlsext_ticket_keys failed\n");
             return -1;
         }
+        
     }
     else
         LSQ_WARN("cannot create SSL context");
-
     TAILQ_FOREACH(sport, prog->prog_sports, next_sport)
         if (0 != sport_init_server(sport, prog->prog_engine, prog->prog_eb))
+        {
+            printf("sport_init_server\n");
             return -1;
-
+        }
     return 0;
 }
 
@@ -659,6 +662,7 @@ prog_prep (struct prog *prog)
                         prog->prog_engine_flags, err_buf, sizeof(err_buf)))
     {
         LSQ_ERROR("Error in settings: %s", err_buf);
+        printf("Error in settings: %s", err_buf);
         return -1;
     }
 
@@ -669,7 +673,6 @@ prog_prep (struct prog *prog)
         prog->prog_api.ea_pmi = NULL;
         prog->prog_api.ea_pmi_ctx = NULL;
     }
-
     if (TAILQ_EMPTY(prog->prog_sports))
     {
         if (prog->prog_hostname)
@@ -679,7 +682,6 @@ prog_prep (struct prog *prog)
         if (0 != s)
             return -1;
     }
-
     if (prog->prog_certs)
     {
     prog->prog_api.ea_lookup_cert = lookup_cert;
@@ -705,7 +707,6 @@ prog_prep (struct prog *prog)
         s = prog_init_server(prog);
     else
         s = prog_init_client(prog);
-
     if (s != 0)
         return -1;
 

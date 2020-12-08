@@ -209,8 +209,8 @@ server_md5_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
 static void
 server_md5_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
 {
-    //char buf[0x1000];
-    char buf[15000];
+    char buf[0x1000];
+    //char buf[15000];
     ssize_t nr;
     nr = lsquic_stream_read(stream, buf, sizeof(buf));
     if (-1 == nr)
@@ -419,7 +419,7 @@ main (int argc, char **argv)
     }
 
     LSQ_DEBUG("entering event loop");
-
+    printf("host name : %s\n",prog.prog_hostname);
     s = prog_run(&prog);
     prog_cleanup(&prog);
 
