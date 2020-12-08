@@ -2,6 +2,7 @@
 CMakeFiles/
 Testing/
 .vscode/
+r_file/
 # ignore all files in the build/ directory
 build/
 
